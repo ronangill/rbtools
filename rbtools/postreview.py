@@ -9,6 +9,7 @@ import platform
 import re
 import sys
 import urllib2
+import httplib
 from optparse import OptionParser
 from pkg_resources import parse_version
 from urlparse import urljoin, urlparse
@@ -44,7 +45,6 @@ class HTTPRequest(urllib2.Request):
 
     def get_method(self):
         return self.method
-
 
 class PresetHTTPAuthHandler(urllib2.BaseHandler):
     """urllib2 handler that conditionally presets the use of HTTP Basic Auth.
@@ -180,6 +180,17 @@ class ReviewBoardHTTPPasswordMgr(urllib2.HTTPPasswordMgr):
             # handlers are global), fall back to standard password management.
             return urllib2.HTTPPasswordMgr.find_user_password(self, realm, uri)
 
+class ReviewBoardHTTPSClientAuthHandler(urllib2.HTTPSHandler):
+    def __init__(self, key, cert):
+        urllib2.HTTPSHandler.__init__(self)
+        self.key = key
+        self.cert = cert
+
+    def https_open(self, req):
+        return self.do_open(self.getConnection, req)
+
+    def getConnection(self, host, timeout=300):
+        return httplib.HTTPSConnection(host, key_file=self.key, cert_file=self.cert)
 
 class ReviewBoardServer(object):
     """
@@ -217,6 +228,10 @@ class ReviewBoardServer(object):
         if options.disable_proxy:
             debug('Disabling HTTP(s) proxy support')
             handlers.append(urllib2.ProxyHandler({}))
+
+        if options.pemfile:
+            debug('Adding handler for client HTTPS certificate')
+            handlers.append(ReviewBoardHTTPSClientAuthHandler(options.pemfile, options.pemfile))
 
         handlers += [
             urllib2.HTTPCookieProcessor(self.cookie_jar),
@@ -1175,6 +1190,11 @@ def parse_options(args):
                       help='the absolute path in the repository the diff was '
                            'generated in. Will override the path detected '
                            'by post-review.')
+    parser.add_option('--pemfile',
+                      dest='pemfile',
+                      default=None,
+                      help='the absolute path to a client certificate used to '
+                           'authenticate against a server by post-review.')
 
     (globals()["options"], args) = parser.parse_args(args)
 
